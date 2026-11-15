@@ -16,6 +16,7 @@
 #include <wchar.h>
 
 #define RUN_MS   600000
+#define COMBO_MS   5000
 #define MAXG     96
 
 #define C_HOT     RGB(190, 255, 205)
@@ -61,6 +62,11 @@ static HHOOK gHkKb = 0, gHkMs = 0;
 
 static DWORD gStart = 0, gNowMs = 0, gTick = 0;
 static int   gStopReq = 0, gClosing = 0;
+
+/* release combo: Esc + R + right Ctrl + Delete, held for COMBO_MS */
+static int   gComboOn = 0, gComboMs = 0;
+static DWORD gComboStart = 0;
+static int   gKeyEsc = 0, gKeyR = 0, gKeyRCtrl = 0, gKeyDel = 0;
 
 /* ---------------- random ---------------- */
 static unsigned int gRng = 0x13579B1u;
@@ -358,6 +364,30 @@ static void DrawHint(HDC dc)
     TxtC(dc, gFHint, C_HINT, gW / 2, y, L"ВВОД ЗАБЛОКИРОВАН");
 }
 
+static void DrawFrame(HDC dc)
+{
+    RECT r;
+    r.left = 0; r.top = 0; r.right = gW; r.bottom = gH;
+
+    if (gComboMs <= 0) {                 /* idle: dim constant border */
+        FrameRect(dc, &r, gBrBorder);
+        return;
+    }
+
+    {                                    /* combo is charging: border heats up */
+        int p = gComboMs * 100 / COMBO_MS;
+        HBRUSH b;
+        if (p > 100) p = 100;
+        b = CreateSolidBrush(RGB(30 + 190 * p / 100,
+                                 55 - 25 * p / 100,
+                                 22 - 10 * p / 100));
+        FrameRect(dc, &r, b);
+        if (p > 20) { RECT r2 = r; InflateRect(&r2, -2, -2); FrameRect(dc, &r2, b); }
+        if (p > 50) { RECT r3 = r; InflateRect(&r3, -4, -4); FrameRect(dc, &r3, b); }
+        DeleteObject(b);
+    }
+}
+
 static void Render(void)
 {
     RECT r;
@@ -367,16 +397,36 @@ static void Render(void)
     DrawGlyphs(gBackDC);
     DrawStatus(gBackDC);
     DrawHint(gBackDC);
-    FrameRect(gBackDC, &r, gBrBorder);
+    DrawFrame(gBackDC);
     BitBlt(gScrDC, 0, 0, gW, gH, gBackDC, 0, 0, SRCCOPY);
 }
 
 /* ---------------- input hooks ---------------- */
+static void TrackKey(int vk, int down)
+{
+    switch (vk) {
+    case VK_ESCAPE:   gKeyEsc = down; break;
+    case 'R':         gKeyR = down; break;
+    case VK_RCONTROL: gKeyRCtrl = down; break;
+    case VK_DELETE:   gKeyDel = down; break;
+    default: return;
+    }
+
+    if (gKeyEsc && gKeyR && gKeyRCtrl && gKeyDel) {
+        if (!gComboOn) {
+            gComboOn = 1;
+            gComboStart = GetTickCount();
+        }
+    } else {
+        gComboOn = 0;
+    }
+}
+
 static LRESULT CALLBACK KbProc(int code, WPARAM wp, LPARAM lp)
 {
     if (code == HC_ACTION) {
         const KBDLLHOOKSTRUCT *k = (const KBDLLHOOKSTRUCT *)lp;
-        if (k->vkCode == (DWORD)'R' && !(k->flags & LLKHF_UP)) gStopReq = 1;
+        TrackKey((int)k->vkCode, !(k->flags & LLKHF_UP));
         return 1;                        /* swallow every key */
     }
     return CallNextHookEx(gHkKb, code, wp, lp);
@@ -442,6 +492,16 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
             return 0;
         }
 
+        if (gComboOn) {
+            gComboMs = (int)(now - gComboStart);
+            if (gComboMs >= COMBO_MS) {
+                DoStop();
+                return 0;
+            }
+        } else {
+            gComboMs = 0;
+        }
+
         TickSpawn(dt);
         StepGlyphs(dt);
         TickWord(dt);
@@ -451,8 +511,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     }
 
     case WM_KEYDOWN:                 /* fallback if the hook failed */
-        if (wp == 'R') { gStopReq = 1; return 0; }
-        break;
+        TrackKey((int)wp, 1);
+        return 0;
+
+    case WM_KEYUP:
+        TrackKey((int)wp, 0);
+        return 0;
 
     case WM_ERASEBKGND:
         return 1;
