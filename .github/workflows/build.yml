@@ -28,14 +28,26 @@ jobs:
           i686-w64-mingw32-gcc -std=c99 -O2 -s -municode -mwindows \
             -Wall -Wextra -Wno-unused-parameter \
             -o dist/Vzlom.exe src/vzlom.c -lgdi32 -luser32
-          i686-w64-mingw32-strip --strip-all dist/Vzlom.exe
-          cd dist && zip -9 Vzlom-win7-x86.zip Vzlom.exe
+
+      - name: Build Blok.exe (Win32, 32-bit, static)
+        run: |
+          i686-w64-mingw32-gcc -std=c99 -O2 -s -municode -mwindows \
+            -Wall -Wextra -Wno-unused-parameter \
+            -o dist/Blok.exe src/blok.c -lgdi32 -luser32
+
+      - name: Strip and pack
+        run: |
+          i686-w64-mingw32-strip --strip-all dist/Vzlom.exe dist/Blok.exe
+          cd dist
+          zip -9 Vzlom-win7-x86.zip Vzlom.exe
+          zip -9 Blok-win7-x86.zip Blok.exe
           ls -l
+          i686-w64-mingw32-objdump -p Blok.exe | grep -i "DLL Name" || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Vzlom-win7-x86
+          name: prank-win7-x86
           path: dist/*
 
   release:
@@ -46,20 +58,27 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: Vzlom-win7-x86
+          name: prank-win7-x86
           path: dist
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Vzlom ${{ github.ref_name }}"
+          name: "Пранки ${{ github.ref_name }}"
           tag_name: ${{ github.ref_name }}
           files: |
             dist/Vzlom.exe
             dist/Vzlom-win7-x86.zip
+            dist/Blok.exe
+            dist/Blok-win7-x86.zip
           generate_release_notes: true
           body: |
-            Анимация «Взлом!» для Windows 7 / 8 / 10 / 11 (x86, работает и на x64).
+            Два полноэкранных прикола для Windows 7 / 8 / 10 / 11 (x86, работают и на x64).
 
-            **Запуск:** распаковать и открыть `Vzlom.exe` (двойной клик).
-            32-битный, без зависимостей и установки, не требует .NET / Python / DLL.
+            **Vzlom.exe** — анимация «Взлом!» на 60 секунд (матрица, копирование файлов, вирусы), потом сама закрывается.
+            **Blok.exe** — блокировка ввода: клавиатура и мышь не реагируют, курсор дрожит,
+            по экрану падают случайные английские буквы. Выход — клавиша **R**, а если её не нажать,
+            всё разблокируется само через 60 секунд. Никакого вреда: только перехват ввода на время показа.
+
+            **Запуск:** распаковать и открыть нужный `.exe` (двойной клик).
+            32-битные, без зависимостей и установки, не требуют .NET / Python / DLL.
