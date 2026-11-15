@@ -15,7 +15,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#define RUN_MS   60000
+#define RUN_MS   600000
 #define MAXG     96
 
 #define C_HOT     RGB(190, 255, 205)
@@ -178,11 +178,18 @@ static const int gCirY[24] = {
 static int gDriftX = 0, gDriftY = 0;
 static int gPhase = 0, gMode = 0, gModeLeft = 0;
 
+/* 0..1000 depending on how much of the run has already passed */
+static int Prog(void)
+{
+    int p = (int)((long long)gNowMs * 1000 / RUN_MS);
+    return p > 1000 ? 1000 : p;
+}
+
 static void ShakeCursor(int dt)
 {
     int amp, x, y, rad;
 
-    amp = 4 + (int)((long long)gNowMs * 150 / 40000);
+    amp = 4 + Prog() * 150 / 1000;
     if (amp > 160) amp = 160;
 
     gModeLeft -= dt;
@@ -243,7 +250,7 @@ static void TickSpawn(int dt)
     if (gSpawnWait > 0) return;
     SpawnGlyph();
     if ((rnd() % 100u) < 30u) SpawnGlyph();
-    base = 800 - (int)(gNowMs * 620 / 40000);
+    base = 800 - Prog() * 620 / 1000;
     if (base < 170) base = 170;
     gSpawnWait = base + rndR(0, 400);
 }
@@ -347,15 +354,8 @@ static void DrawStatus(HDC dc)
 
 static void DrawHint(HDC dc)
 {
-    wchar_t s[160];
-    int rem = (int)((RUN_MS - gNowMs + 999) / 1000);
     int y = gH - gH / 22;
-
-    if (rem < 0) rem = 0;
-    wsprintfW(s,
-        L"ВВОД ЗАБЛОКИРОВАН   ·   R — СНЯТЬ БЛОКИРОВКУ   ·   %02d:%02d",
-        rem / 60, rem % 60);
-    TxtC(dc, gFHint, C_HINT, gW / 2, y, s);
+    TxtC(dc, gFHint, C_HINT, gW / 2, y, L"ВВОД ЗАБЛОКИРОВАН");
 }
 
 static void Render(void)
