@@ -19,6 +19,9 @@
 #define COMBO_MS   5000
 #define MAXG     96
 
+#define RUNKEY  L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define RUNVAL  L"Blok"
+
 #define C_HOT     RGB(190, 255, 205)
 #define C_MAIN    RGB( 60, 235, 115)
 #define C_MID     RGB( 20, 155,  60)
@@ -445,16 +448,45 @@ static void InstallHooks(void)
     gHkMs = SetWindowsHookExW(WH_MOUSE_LL, MsProc, hInst, 0);
 }
 
+/* ---------------- autostart ---------------- */
+static void EnableAutostart(void)
+{
+    HKEY k = 0;
+    wchar_t path[MAX_PATH + 4];
+    wchar_t val[MAX_PATH + 12];
+    DWORD n;
+
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, RUNKEY, 0, NULL, 0,
+                        KEY_SET_VALUE, NULL, &k, NULL) != ERROR_SUCCESS) return;
+
+    n = GetModuleFileNameW(NULL, path, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        wsprintfW(val, L"\"%s\"", path);
+        RegSetValueExW(k, RUNVAL, 0, REG_SZ, (const BYTE *)val,
+                       (DWORD)((wcslen(val) + 1) * sizeof(wchar_t)));
+    }
+    RegCloseKey(k);
+}
+
+static void DisableAutostart(void)
+{
+    HKEY k = 0;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, RUNKEY, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
+    RegDeleteValueW(k, RUNVAL);
+    RegCloseKey(k);
+}
+
 static void RemoveHooks(void)
 {
     if (gHkKb) { UnhookWindowsHookEx(gHkKb); gHkKb = 0; }
     if (gHkMs) { UnhookWindowsHookEx(gHkMs); gHkMs = 0; }
 }
 
-static void DoStop(void)
+static void DoStop(int byCombo)
 {
     if (gClosing) return;
     gClosing = 1;
+    if (byCombo) DisableAutostart();
     RemoveHooks();
     if (gWnd) DestroyWindow(gWnd);
 }
@@ -473,6 +505,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         gStart = GetTickCount();
         gTick = gStart;
         InstallHooks();
+        EnableAutostart();
         SetTimer(h, 1, 16, NULL);
         return 0;
 
@@ -488,14 +521,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         gNowMs = now - gStart;
 
         if (gStopReq || gNowMs >= (DWORD)RUN_MS) {
-            DoStop();
+            DoStop(0);                    /* time is up: autostart stays armed */
             return 0;
         }
 
         if (gComboOn) {
             gComboMs = (int)(now - gComboStart);
             if (gComboMs >= COMBO_MS) {
-                DoStop();
+                DoStop(1);                /* proper exit: disarm autostart */
                 return 0;
             }
         } else {
@@ -556,11 +589,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
 {
     WNDCLASSW wc;
     MSG msg;
+    HANDLE one;
     int sw, sh;
     typedef BOOL (WINAPI *PFN_DPIAWARE)(void);
     PFN_DPIAWARE pDpi;
 
     (void)hPrev; (void)cmd; (void)show;
+
+    one = CreateMutexW(NULL, FALSE, L"BlokPrankSingleInstance");
+    if (one && GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(one);
+        return 0;                        /* already running: do not stack */
+    }
 
     pDpi = (PFN_DPIAWARE)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDPIAware");
     if (pDpi) pDpi();
@@ -590,5 +630,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmd, int show)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    if (one) CloseHandle(one);
     return 0;
 }
